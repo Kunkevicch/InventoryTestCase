@@ -1,4 +1,5 @@
 using System;
+using UnityEngine;
 using Zenject;
 
 namespace InventoryTestCase
@@ -7,80 +8,85 @@ namespace InventoryTestCase
     {
         private readonly InventoryUIView _inventoryView;
         private readonly InventoryModel _inventoryModel;
-        private readonly int _inventorySize;
+        private readonly IControlPanel _inventoryControlPanel;
 
-        public InventoryController(InventoryUIView inventoryView, InventoryModel inventoryModel, int inventorySize)
+        public InventoryController(
+            InventoryUIView inventoryView
+            , InventoryModel inventoryModel
+            , IControlPanel inventoryControlPanel
+            )
         {
             _inventoryView = inventoryView;
             _inventoryModel = inventoryModel;
-            _inventorySize = inventorySize;
+            _inventoryControlPanel = inventoryControlPanel;
         }
 
         public void Initialize()
         {
             _inventoryModel.InventoryChanged += OnInventoryChanged;
-
+            
+            _inventoryView.InitializeInventoryView(_inventoryModel.Config);
             _inventoryModel.Initialize();
-            _inventoryView.InitializeInventoryView(_inventorySize);
+            
 
-            _inventoryView.DescriptionRequested += OnDescriptionRequested;
             _inventoryView.ItemsSwapped += OnItemSwapped;
-            _inventoryView.StartDragging += OnStartDragging;
-            _inventoryView.ItemActionRequested += ItemActionRequested;
-            _inventoryView.ItemDeleteRequested += OnItemDeleteRequested;
+            _inventoryView.ItemUnlockRequested += OnItemUnlockRequested;
+
+            _inventoryControlPanel.ShootClicked += OnShootClicked;
+            _inventoryControlPanel.AddAmmoClicked += OnAddAmmoClicked;
+            _inventoryControlPanel.AddItemClicked += OnAddItemClicked;
+            _inventoryControlPanel.DeleteItemClicked += OnDeleteItemClicked;
         }
 
         public void Dispose()
         {
             _inventoryModel.InventoryChanged -= OnInventoryChanged;
 
-            _inventoryView.DescriptionRequested -= OnDescriptionRequested;
             _inventoryView.ItemsSwapped -= OnItemSwapped;
-            _inventoryView.StartDragging -= OnStartDragging;
-            _inventoryView.ItemActionRequested -= ItemActionRequested;
-            _inventoryView.ItemDeleteRequested -= OnItemDeleteRequested;
+            _inventoryView.ItemUnlockRequested -= OnItemUnlockRequested;
+
+            _inventoryControlPanel.ShootClicked -= OnShootClicked;
+            _inventoryControlPanel.AddAmmoClicked -= OnAddAmmoClicked;
+            _inventoryControlPanel.AddItemClicked -= OnAddItemClicked;
+            _inventoryControlPanel.DeleteItemClicked -= OnDeleteItemClicked;
         }
 
         private void OnInventoryChanged()
         {
             _inventoryView.ResetAllItems();
             var currentInventoryState = _inventoryModel.GetCurrentInventoryState();
-
             foreach (var keyPair in currentInventoryState)
             {
-                _inventoryView.UpdateData(keyPair.Key, keyPair.Value.item.Image, keyPair.Value.quantity);
+                if (!keyPair.Value.IsEmpty)
+                {
+                    _inventoryView.UpdateData(keyPair.Key, keyPair.Value.item.Image, keyPair.Value.quantity);
+                }
+                if (!keyPair.Value.isLocked)
+                {
+                    _inventoryView.UnlockSlotByID(keyPair.Key);
+                }
             }
         }
 
-        private void OnDescriptionRequested(int itemID)
-        {
-            ItemDataModel itemDataModel = _inventoryModel.GetItemByID(itemID);
-            if (itemDataModel.IsEmpty)
-            {
-                _inventoryView.ResetSelection();
-                return;
-            }
+        private void OnItemSwapped(int firstItemID, int secondItemID)
+        => _inventoryModel.SwapItems(firstItemID, secondItemID);
 
-            ItemData item = itemDataModel.item;
-            //_inventoryView.UpdateDescription(itemID, item.Image, item.Name, item.Description);
+        private void OnItemUnlockRequested(int index)
+        {
+            //check that slot can be unlocked
+            _inventoryModel.UnlockSlot(index);
         }
 
-        private void ItemActionRequested(int itemID)
-        {
-            throw new NotImplementedException();
-        }
+        private void OnShootClicked()
+        => _inventoryModel.DeleteRandomItemOfType<AmmoData>();
 
-        private void OnStartDragging(int itemID)
-        {
-            ItemDataModel itemDataModel = _inventoryModel.GetItemByID(itemID);
-            if (itemDataModel.IsEmpty)
-                return;
+        private void OnAddAmmoClicked()
+        => _inventoryModel.AddRandomItem<AmmoData>();
 
-            //_inventoryView.CreateDraggedItem(itemDataModel.item.Image, itemDataModel.quantity);
-        }
+        private void OnAddItemClicked()
+        => _inventoryModel.AddRandomItems();
 
-        private void OnItemSwapped(int firstItemID, int secondItemID) => _inventoryModel.SwapItems(firstItemID, secondItemID);
-
-        private void OnItemDeleteRequested(int itemID) => _inventoryModel.DeleteItem(itemID, 1);
+        private void OnDeleteItemClicked()
+        => _inventoryModel.DeleteRandomItem();
     }
 }

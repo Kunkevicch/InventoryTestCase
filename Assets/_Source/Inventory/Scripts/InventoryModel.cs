@@ -1,35 +1,71 @@
+using Newtonsoft.Json;
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Text;
 using UnityEngine;
 
 namespace InventoryTestCase
 {
-    public class InventoryModel
+    public class InventoryModel : IDisposable
     {
         private List<ItemDataModel> _inventoryItems;
-        private readonly int _size;
+        private readonly IStorageService _storageService;
+        private readonly InventoryConfig _config;
 
-        public InventoryModel(int size)
+        private const string SAVE_DATA_KEY = "inventory";
+        public InventoryModel(InventoryConfig config, IStorageService storageService)
         {
-            _size = size;
+            _config = config;
+            _storageService = storageService;
         }
 
         public event Action InventoryChanged;
 
-        public int Size => _size;
+        public int Size => _config.SlotsPrices.Count;
+        public InventoryConfig Config => _config;
 
         public void Initialize()
         {
             _inventoryItems = new List<ItemDataModel>();
-            for (int i = 0; i < _size; i++)
+            for (int i = 0; i < Size; i++)
             {
-                _inventoryItems.Add(ItemDataModel.GetEmptyItem());
+                _inventoryItems.Add(
+                    ItemDataModel.GetEmptyItem()
+                    .SetLockStatus(_config.SlotsPrices[i] != 0)
+                    );
             }
+            _storageService.Load<InventorySaveData>(SAVE_DATA_KEY, OnLoad);
+        }
+
+        public void Dispose()
+        => InventoryChanged -= OnInventoryChanged;
+
+
+        private void OnLoad(InventorySaveData loadedData)
+        {
+            for (int i = 0; i < loadedData.InventoryItems.Count; i++)
+            {
+                ItemDataModel slotDataModel = _inventoryItems[i];
+                slotDataModel = slotDataModel.ChangeQuantity(loadedData.InventoryItems[i].quantity);
+                slotDataModel.item = GetItemByID(loadedData.InventoryItems[i].itemID);
+                slotDataModel = slotDataModel.SetLockStatus(loadedData.InventoryItems[i].IsLocked);
+                _inventoryItems[i] = slotDataModel;
+            }
+
+            InventoryChanged?.Invoke();
+
+            InventoryChanged += OnInventoryChanged;
         }
 
         public int AddItem(ItemData item, int quantity)
         {
+            if (IsInventoryFull())
+            {
+                Debug.LogError("Inventory is full!");
+                return 0;
+            }
+
             if (!item.IsStackable)
             {
                 for (int i = 0; i < _inventoryItems.Count; i++)
@@ -44,6 +80,9 @@ namespace InventoryTestCase
                 }
             }
             quantity = AddStackableItem(item, quantity);
+            var newData = new InventorySaveData();
+
+            _storageService.Save(SAVE_DATA_KEY, newData);
             InventoryChanged?.Invoke();
             return quantity;
         }
@@ -54,7 +93,8 @@ namespace InventoryTestCase
 
             for (int i = 0; i < _inventoryItems.Count; i++)
             {
-                if (_inventoryItems[i].IsEmpty)
+
+                if (_inventoryItems[i].IsEmpty && !_inventoryItems[i].isLocked)
                 {
                     _inventoryItems[i] = newItemDataModel;
                     return quantity;
@@ -64,13 +104,16 @@ namespace InventoryTestCase
         }
 
         private bool IsInventoryFull()
-        => !_inventoryItems.Where(item => item.IsEmpty).Any();
+        => !_inventoryItems.Where(item => !item.isLocked).Any(item => item.IsEmpty);
+
+        private bool IsInventoryEmpty()
+            => _inventoryItems.Where(item => !item.isLocked).All(item => item.IsEmpty);
 
         private int AddStackableItem(ItemData item, int quantity)
         {
             for (int i = 0; i < _inventoryItems.Count; i++)
             {
-                if (_inventoryItems[i].IsEmpty)
+                if (_inventoryItems[i].IsEmpty || _inventoryItems[i].isLocked)
                     continue;
 
                 if (_inventoryItems[i].item.ID == item.ID)
@@ -104,8 +147,61 @@ namespace InventoryTestCase
 
         public void AddItem(ItemDataModel item) => AddItem(item.item, item.quantity);
 
+        public void AddRandomItems()
+        {
+            AddRandomItem<AmmoData>();
+            AddRandomItem<EquipData>();
+            AddRandomItem<WeaponData>();
+        }
+
+        public void AddRandomItem<T>() where T : ItemData
+        {
+            var randomItemOfType = GetRandomAvailableItem<T>();
+            AddItem(randomItemOfType, randomItemOfType.MaxStackSize);
+        }
+
+        private ItemData GetRandomAvailableItem<T>() where T : ItemData
+        {
+            var availableItemsOfType = _config.AvailableItems.FindAll(x => x is T);
+            return availableItemsOfType[UnityEngine.Random.Range(0, availableItemsOfType.Count)];
+        }
+
+        private ItemData GetItemByID(string ID)
+        => _config.AvailableItems.Find(x => x.ID == ID);
+
+
+        public void DeleteRandomItemOfType<T>(int amount = 1) where T : ItemData
+        {
+            var randomItemsOfType = _inventoryItems.FindAll(x => x.item is T);
+            if (randomItemsOfType.Count == 0)
+            {
+                Debug.LogError($"Cant find items of type:{typeof(T).Name}");
+                return;
+            }
+            int index = _inventoryItems.IndexOf(randomItemsOfType[UnityEngine.Random.Range(0, randomItemsOfType.Count)]);
+
+            DeleteItem(index, amount);
+        }
+        public void DeleteRandomItem()
+        {
+            if (IsInventoryEmpty())
+            {
+                Debug.LogError("Inventory is empty");
+                return;
+            }
+            var randomItems = _inventoryItems.FindAll(x => !x.IsEmpty && !x.isLocked);
+            int randomItemID = _inventoryItems.IndexOf(randomItems[UnityEngine.Random.Range(0, randomItems.Count)]);
+            DeleteItem(randomItemID, _inventoryItems[randomItemID].quantity);
+        }
+
         public void DeleteItem(int itemID, int amount)
         {
+            if (IsInventoryEmpty())
+            {
+                Debug.LogError("Inventory is empty!!");
+                return;
+            }
+
             if (_inventoryItems.Count > itemID)
             {
                 if (_inventoryItems[itemID].IsEmpty)
@@ -126,10 +222,8 @@ namespace InventoryTestCase
         }
 
         public void DeleteItem(ItemDataModel item)
-        {
-            var findedItem = _inventoryItems.IndexOf(item);
-            DeleteItem(findedItem, 1);
-        }
+        => DeleteItem(_inventoryItems.IndexOf(item), 1);
+
 
         public Dictionary<int, ItemDataModel> GetCurrentInventoryState()
         {
@@ -138,12 +232,13 @@ namespace InventoryTestCase
 
             for (int i = 0; i < _inventoryItems.Count; i++)
             {
-                if (_inventoryItems[i].IsEmpty)
+                if (_inventoryItems[i].IsEmpty && _inventoryItems[i].isLocked)
                 {
                     continue;
                 }
                 returnValue[i] = _inventoryItems[i];
             }
+
             return returnValue;
         }
 
@@ -155,44 +250,49 @@ namespace InventoryTestCase
             InventoryChanged?.Invoke();
         }
 
-        public int TryConsumeAmmoFromMultipleStacks(ItemData ammoData, int requiredAmount)
+        public void UnlockSlot(int index)
         {
-            int remainingAmount = requiredAmount;
-            int consumedAmmo = 0;
-
-            foreach (var item in _inventoryItems)
-            {
-                if (item.IsEmpty)
-                    continue;
-                if (item.item.ID == ammoData.ID && item.quantity > 0)
-                {
-                    if (item.quantity >= remainingAmount)
-                    {
-                        DeleteItem(_inventoryItems.IndexOf(item), remainingAmount);
-                        consumedAmmo += remainingAmount;
-                        remainingAmount = 0;
-                        break;
-                    }
-                    else
-                    {
-                        consumedAmmo += item.quantity;
-                        remainingAmount -= item.quantity;
-                        DeleteItem(_inventoryItems.IndexOf(item), item.quantity);
-                    }
-                }
-
-                if (remainingAmount <= 0)
-                {
-                    break;
-                }
-            }
-
-            if (consumedAmmo > 0)
-            {
-                InventoryChanged?.Invoke();
-            }
-
-            return consumedAmmo;
+            _inventoryItems[index] = _inventoryItems[index].SetLockStatus(false);
+            InventoryChanged?.Invoke();
         }
+
+        private void OnInventoryChanged()
+        {
+            InventorySaveData saveData = new();
+
+            for (int i = 0; i < _inventoryItems.Count; i++)
+            {
+                InventorySaveDataDetails saveDataDetails = new()
+                {
+                    quantity = _inventoryItems[i].quantity,
+                    itemID = _inventoryItems[i].IsEmpty ? "" : _inventoryItems[i].item.ID,
+                    IsLocked = _inventoryItems[i].isLocked,
+                    IsEmpty = _inventoryItems[i].IsEmpty
+                };
+                saveData.InventoryItems.Add(i, saveDataDetails);
+            }
+
+            _storageService.Save(SAVE_DATA_KEY, saveData);
+        }
+    }
+
+    [Serializable]
+    public class InventorySaveData
+    {
+        [JsonProperty(PropertyName = "Items")]
+        public Dictionary<int, InventorySaveDataDetails> InventoryItems;
+
+        public InventorySaveData()
+        {
+            InventoryItems = new();
+        }
+    }
+
+    public struct InventorySaveDataDetails
+    {
+        public int quantity;
+        public string itemID;
+        public bool IsLocked;
+        public bool IsEmpty;
     }
 }

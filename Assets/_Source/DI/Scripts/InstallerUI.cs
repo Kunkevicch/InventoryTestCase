@@ -5,18 +5,23 @@ using Zenject;
 public class InstallerUI : MonoInstaller
 {
     [SerializeField] private InventoryUIView _inventoryView;
-    [SerializeField] private int _inventorySize;
 
     public override void InstallBindings()
     {
-        Container.BindInterfacesAndSelfTo<InventoryModel>()
+        BindUI();
+    }
+
+    private void BindUI()
+    {
+        Container.BindInterfacesTo<InventoryControlPanel>()
+            .FromComponentInHierarchy()
             .AsSingle()
-            .WithArguments(_inventorySize)
             .NonLazy();
+
 
         Container.BindInterfacesAndSelfTo<InventoryController>()
             .AsSingle()
-            .WithArguments(_inventoryView, _inventorySize)
+            .WithArguments(_inventoryView)
             .NonLazy();
     }
 }

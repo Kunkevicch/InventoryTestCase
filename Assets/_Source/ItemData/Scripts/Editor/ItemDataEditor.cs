@@ -3,7 +3,8 @@ using UnityEngine;
 
 namespace InventoryTestCase
 {
-    [CustomEditor(typeof(ItemData))]
+    [CanEditMultipleObjects]
+    [CustomEditor(typeof(ItemData), true)]
     public class ItemDataEditor : Editor
     {
         private SerializedProperty _isStackableProp;
@@ -12,7 +13,6 @@ namespace InventoryTestCase
         public override void OnInspectorGUI()
         {
             serializedObject.Update();
-
 
             _isStackableProp = serializedObject.FindProperty("_isStackable");
             _maxStackSizeProp = serializedObject.FindProperty("_maxStackSize");

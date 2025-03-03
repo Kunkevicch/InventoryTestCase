@@ -9,12 +9,12 @@ namespace InventoryTestCase
         [SerializeField] private ItemUIView _itemPrefab;
         [SerializeField] private RectTransform _contentPanel;
 
-        List<ItemUIView> _listOfItemsView = new();
+        private readonly List<ItemUIView> _listOfItemsView = new();
         private int _currentSelectedItemID = -1;
 
-        public void InitializeInventoryView(int inventorySize)
+        public void InitializeInventoryView(InventoryConfig inventoryConfig)
         {
-            for (int i = 0; i < inventorySize; i++)
+            for (int i = 0; i < inventoryConfig.SlotsPrices.Count; i++)
             {
                 ItemUIView uiItem = Instantiate(_itemPrefab, Vector3.zero, Quaternion.identity);
                 uiItem.transform.SetParent(_contentPanel);
@@ -23,16 +23,19 @@ namespace InventoryTestCase
                 uiItem.ItemBeginDrag += OnItemBeginDragged;
                 uiItem.ItemEndDrag += OnItemEndDragged;
                 uiItem.ItemDropped += OnItemDropped;
+                uiItem.SlotsUnlocked += OnItemUnlocked;
+
+                if (inventoryConfig.SlotsPrices[i] == 0)
+                {
+                    uiItem.Unlock();
+                }
 
                 _listOfItemsView.Add(uiItem);
             }
         }
 
-        public event Action<int> DescriptionRequested;
-        public event Action<int> ItemActionRequested;
-        public event Action<int> StartDragging;
         public event Action<int, int> ItemsSwapped;
-        public event Action<int> ItemDeleteRequested;
+        public event Action<int> ItemUnlockRequested;
 
         public void UpdateData(int itemIndex, Sprite itemImage, int itemQuantity)
         {
@@ -52,10 +55,14 @@ namespace InventoryTestCase
         }
 
         public void ResetSelection()
+        => DeselectAllItems();
+
+        public void UnlockSlotByID(int id)
         {
-            //_deleteBtn.gameObject.SetActive(false);
-            //_description.ResetDescription();
-            DeselectAllItems();
+            if (_listOfItemsView.Count > id)
+            {
+                _listOfItemsView[id].Unlock();
+            }
         }
 
         private void OnItemClicked(ItemUIView itemView)
@@ -72,8 +79,6 @@ namespace InventoryTestCase
             _currentSelectedItemID = index;
 
             _listOfItemsView[_currentSelectedItemID].Select();
-            //_deleteBtn.gameObject.SetActive(false);
-            DescriptionRequested?.Invoke(index);
         }
 
         private void OnItemBeginDragged(ItemUIView itemView)
@@ -82,12 +87,10 @@ namespace InventoryTestCase
             if (index == -1)
                 return;
             _currentSelectedItemID = index;
-            //OnItemBeginDragged(itemView);
-            StartDragging?.Invoke(index);
         }
 
-        private void OnItemEndDragged(ItemUIView itemView) =>
-            ResetDraggedItem();
+        private void OnItemEndDragged(ItemUIView itemView)
+        => ResetDraggedItem();
 
 
         private void OnItemDropped(ItemUIView itemView)
@@ -98,8 +101,13 @@ namespace InventoryTestCase
             {
                 return;
             }
+
             ItemsSwapped?.Invoke(_currentSelectedItemID, index);
         }
+
+        private void OnItemUnlocked(ItemUIView itemView)
+        => ItemUnlockRequested?.Invoke(_listOfItemsView.IndexOf(itemView));
+
 
         private void DeselectAllItems()
         {
@@ -110,7 +118,6 @@ namespace InventoryTestCase
         }
         private void ResetDraggedItem()
         {
-            //_inventoryPointerFollow.Toggle(false);
             _currentSelectedItemID = -1;
         }
     }
